@@ -4,6 +4,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:io' show Platform;
+import 'ultralytics/presentation/screens/camera_inference_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -12,6 +13,9 @@ void main() async {
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown, // optional
   ]);
+
+  // Hide status and navigation bars across the app
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
   runApp(const MyApp());
 }
@@ -66,7 +70,7 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Verseye Demo'),
+        title: const Text('Verseye'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
       body: Center(
@@ -83,7 +87,7 @@ class HomeScreen extends StatelessWidget {
                   minimumSize: const Size(double.infinity, 60),
                   textStyle: const TextStyle(fontSize: 18),
                 ),
-                child: const Text('Model on Device'),
+                child: const Text('CV using Custom Models on Device'),
               ),
               const SizedBox(height: 20),
               ElevatedButton(
@@ -99,7 +103,23 @@ class HomeScreen extends StatelessWidget {
                   minimumSize: const Size(double.infinity, 60),
                   textStyle: const TextStyle(fontSize: 18),
                 ),
-                child: const Text('Model on Server'),
+                child: const Text('CV using Verseye on Server'),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const CameraInferenceScreen(),
+                    ),
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 60),
+                  textStyle: const TextStyle(fontSize: 18),
+                ),
+                child: const Text('CV using Pretrained Models on Device'),
               ),
             ],
           ),
@@ -121,6 +141,10 @@ class _WebViewScreenState extends State<WebViewScreen>
   late final WebViewController controller;
   bool isLoading = true;
   bool showSplash = true;
+  // Swipe-back state
+  bool _isSwipingBack = false;
+  double _swipeProgress = 0.0;
+  double? _dragStartX;
   late AnimationController _animationController;
   late Animation<double> _pulseAnimation;
   late Animation<double> _rotateAnimation;
@@ -331,29 +355,91 @@ class _WebViewScreenState extends State<WebViewScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Model on Server'),
-        backgroundColor: const Color(0xFF027E70),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Reload',
-            onPressed: () async {
-              await controller.reload();
-            },
-          ),
-        ],
-      ),
-      body: Stack(
-        children: [
-          RefreshIndicator(
-            onRefresh: _onRefresh,
-            color: const Color(0xFF027E70),
-            backgroundColor: Colors.white,
-            child: WebViewWidget(controller: controller),
-          ),
-          if (showSplash) _buildSplashScreen(),
-        ],
+      // appBar: AppBar(
+      //   title: const Text('CV using Verseye'),
+      //   backgroundColor: const Color(0xFF027E70),
+      //   actions: [
+      //     IconButton(
+      //       icon: const Icon(Icons.refresh),
+      //       tooltip: 'Reload',
+      //       onPressed: () async {
+      //         await controller.reload();
+      //       },
+      //     ),
+      //   ],
+      // ),
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragStart: (details) {
+          _dragStartX = details.globalPosition.dx;
+          // Only trigger when gesture starts near the left edge to avoid
+          // interfering with WebView horizontal gestures.
+          _isSwipingBack = (_dragStartX ?? 0) < 32;
+          if (_isSwipingBack) {
+            setState(() {
+              _swipeProgress = 0.0;
+            });
+          }
+        },
+        onHorizontalDragUpdate: (details) {
+          if (!_isSwipingBack || _dragStartX == null) return;
+          final dx = details.globalPosition.dx - _dragStartX!;
+          // Only consider rightward drags
+          final progress = (dx / 140).clamp(0.0, 1.0);
+          setState(() {
+            _swipeProgress = progress;
+          });
+        },
+        onHorizontalDragEnd: (details) {
+          if (_isSwipingBack) {
+            final shouldPop =
+                _swipeProgress > 0.5 ||
+                (details.primaryVelocity != null &&
+                    details.primaryVelocity! > 300);
+            if (shouldPop && Navigator.of(context).canPop()) {
+              Navigator.of(context).pop();
+            }
+          }
+          setState(() {
+            _isSwipingBack = false;
+            _swipeProgress = 0.0;
+            _dragStartX = null;
+          });
+        },
+        child: Stack(
+          children: [
+            RefreshIndicator(
+              onRefresh: _onRefresh,
+              color: const Color(0xFF027E70),
+              backgroundColor: Colors.white,
+              child: WebViewWidget(controller: controller),
+            ),
+            if (_isSwipingBack)
+              Positioned(
+                left: 16 + (_swipeProgress * 56),
+                top: MediaQuery.of(context).size.height / 2 - 28,
+                child: AnimatedOpacity(
+                  opacity: _swipeProgress,
+                  duration: const Duration(milliseconds: 80),
+                  child: Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.5),
+                      shape: BoxShape.circle,
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(
+                      Icons.chevron_left,
+                      color: Colors.white.withOpacity(_swipeProgress),
+                      size: 32,
+                    ),
+                  ),
+                ),
+              ),
+            if (showSplash) _buildSplashScreen(),
+          ],
+        ),
       ),
     );
   }

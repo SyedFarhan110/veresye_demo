@@ -28,6 +28,9 @@ import android.provider.MediaStore
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import android.view.Gravity
+import android.os.Build
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import org.tensorflow.lite.support.image.ImageProcessor
 import org.tensorflow.lite.support.image.TensorImage
 import org.tensorflow.lite.support.image.ops.ResizeOp
@@ -161,6 +164,13 @@ class MainActivity : AppCompatActivity() {
     // Camera state management
     private var isCameraOpen = false
     private var captureSession: CameraCaptureSession? = null
+
+    // Swipe-back UI elements
+    private var isSwipingBack = false
+    private var swipeProgress = 0f
+    private var dragStartX: Float? = null
+    private lateinit var edgeSwipeArea: View
+    private lateinit var edgeChevron: ImageView
     
     data class Detection(
         val x1: Float, val y1: Float, val x2: Float, val y2: Float,
@@ -175,6 +185,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_object_detection)
+        hideSystemUI()
         get_permission()
 
         paint.style = Paint.Style.STROKE
@@ -193,6 +204,13 @@ class MainActivity : AppCompatActivity() {
         settingsButton.setOnClickListener { showModelSelectionDialog() }
 
         fpsTextView = findViewById(R.id.fpsTextView)
+
+        // Back button clickfindViewById<ImageButton>(R.id.backButton)?.setOnClickListener { finish() }
+
+        // Edge swipe and chevron
+        edgeSwipeArea = findViewById(R.id.edgeSwipeArea)
+        edgeChevron = findViewById(R.id.edgeChevron)
+        setupEdgeSwipe()
         
         bottomDashboard = findViewById(R.id.bottomDashboard)
         dashboardEmoji1 = findViewById(R.id.dashboardEmoji1)
@@ -271,6 +289,72 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun dp(value: Float): Float = value * resources.displayMetrics.density
+
+    private fun setupEdgeSwipe() {
+        edgeSwipeArea.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    dragStartX = event.rawX
+                    isSwipingBack = (dragStartX ?: 0f) < dp(32f)
+                    if (isSwipingBack) {
+                        swipeProgress = 0f
+                        edgeChevron.visibility = View.VISIBLE
+                        edgeChevron.alpha = 0f
+                        edgeChevron.translationX = dp(16f)
+                    }
+                    isSwipingBack
+                }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    if (!isSwipingBack || dragStartX == null) return@setOnTouchListener false
+                    val dx = event.rawX - (dragStartX ?: 0f)
+                    val progress = (dx / dp(140f)).coerceIn(0f, 1f)
+                    swipeProgress = progress
+                    edgeChevron.alpha = progress
+                    edgeChevron.translationX = dp(16f) + progress * dp(56f)
+                    true
+                }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                    if (isSwipingBack) {
+                        val dx = (event.rawX - (dragStartX ?: 0f))
+                        val shouldFinish = dx > dp(120f) || swipeProgress > 0.5f
+                        if (shouldFinish) finish()
+                    }
+                    isSwipingBack = false
+                    swipeProgress = 0f
+                    dragStartX = null
+                    edgeChevron.visibility = View.GONE
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    private fun hideSystemUI() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false)
+            val controller = window.insetsController
+            controller?.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
+            controller?.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = (
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                View.SYSTEM_UI_FLAG_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            )
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideSystemUI()
     }
 
     private suspend fun fetchModelList() {

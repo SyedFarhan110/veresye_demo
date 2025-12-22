@@ -8,15 +8,15 @@ plugins {
 android {
     namespace = "com.example.verseye_demo"
     compileSdk = 36
-    ndkVersion = flutter.ndkVersion
+    ndkVersion = "28.0.13004108"
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_11.toString()
+        jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
     defaultConfig {
@@ -47,6 +47,17 @@ android {
     aaptOptions {
         noCompress += "tflite"
     }
+    
+    packagingOptions {
+        jniLibs {
+            pickFirsts += setOf(
+                "lib/arm64-v8a/libtensorflowlite_jni.so",
+                "lib/armeabi-v7a/libtensorflowlite_jni.so",
+                "lib/x86/libtensorflowlite_jni.so",
+                "lib/x86_64/libtensorflowlite_jni.so"
+            )
+        }
+    }
 }
 
 flutter {
@@ -54,10 +65,11 @@ flutter {
 }
 
 dependencies {
-    // TensorFlow Lite
-    implementation("org.tensorflow:tensorflow-lite:2.14.0")
-    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
-    implementation("org.tensorflow:tensorflow-lite-gpu:2.14.0")
+    // LiteRT (TensorFlow Lite rebranded) - Same versions as ultralytics_yolo
+    implementation("com.google.ai.edge.litert:litert:1.4.0")
+    implementation("com.google.ai.edge.litert:litert-gpu:1.4.0")
+    implementation("com.google.ai.edge.litert:litert-support-api:1.4.0")
+    implementation("com.google.ai.edge.litert:litert-metadata:1.4.0")
     
     // Kotlin Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")

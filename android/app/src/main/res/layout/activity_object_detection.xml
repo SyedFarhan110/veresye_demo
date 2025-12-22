@@ -43,7 +43,7 @@
         android:paddingLeft="8dp"
         android:paddingRight="16dp">
 
-        <ImageButton
+        <!-- <ImageButton
             android:id="@+id/backButton"
             android:layout_width="48dp"
             android:layout_height="48dp"
@@ -51,7 +51,7 @@
             android:src="@android:drawable/ic_menu_revert"
             android:contentDescription="Back"
             android:scaleType="fitCenter"
-            android:padding="8dp" />
+            android:padding="8dp" /> -->
 
         <TextView
             android:id="@+id/fpsTextView"
@@ -187,5 +187,25 @@
         </LinearLayout>
 
     </LinearLayout>
+
+    <!-- Left-edge swipe area for back gesture -->
+    <View
+        android:id="@+id/edgeSwipeArea"
+        android:layout_width="32dp"
+        android:layout_height="match_parent"
+        android:layout_alignParentLeft="true"
+        android:background="@android:color/transparent"
+        android:clickable="true" />
+
+    <!-- Chevron indicator shown during swipe-back -->
+    <ImageView
+        android:id="@+id/edgeChevron"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_alignParentLeft="true"
+        android:layout_centerVertical="true"
+        android:visibility="gone"
+        android:src="@android:drawable/ic_media_previous"
+        android:tint="@android:color/white" />
 
 </RelativeLayout>
