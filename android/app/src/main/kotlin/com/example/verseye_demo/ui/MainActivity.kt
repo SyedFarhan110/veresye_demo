@@ -165,6 +165,10 @@ class MainActivity : AppCompatActivity() {
     private var isCameraOpen = false
     private var captureSession: CameraCaptureSession? = null
 
+    // Track last processed frame dimensions for correct overlay scaling
+    private var lastFrameWidth: Int = 0
+    private var lastFrameHeight: Int = 0
+
     // Swipe-back UI elements
     private var isSwipingBack = false
     private var swipeProgress = 0f
@@ -710,7 +714,7 @@ class MainActivity : AppCompatActivity() {
 }
 
 
-    private fun runInference(image: TensorImage): InferenceResult {
+     private fun runInference(image: TensorImage): InferenceResult {
         val modelIndex = currentModelIndex ?: return InferenceResult(emptyList())
         val currentModel = availableModels[modelIndex]
         val interpreter = currentInterpreter ?: return InferenceResult(emptyList())
@@ -774,11 +778,11 @@ class MainActivity : AppCompatActivity() {
                         InferenceResult(runYoloxInference(interpreter, image))
                     }
                 }
-                "license_plate", "license plate", "lpd" -> {
+                "license_plate", "license plate", "lpd", "face", "face_detection"-> {
                     Log.d("Inference", "Using LicensePlateDetectionHelper for ${currentModel.name}")
-                    if (licensePlateHelper != null) {
+                    if (faceHelper != null) {
                         val bitmap = image.bitmap
-                        val lpDetections = licensePlateHelper!!.runInference(bitmap)
+                        val lpDetections = faceHelper!!.runInference(bitmap)
                         // Convert license plate detections to standard Detection format
                         val detections = lpDetections.map { det ->
                             Detection(
@@ -836,11 +840,11 @@ class MainActivity : AppCompatActivity() {
                         InferenceResult(runYoloxInference(interpreter, image))
                     }
                 }
-                "fire_smoke", "fire", "smoke" -> {
+                "fire_smoke", "fire", "smoke" , "face", "face_detection"-> {
                     Log.d("Inference", "Using FireSmokeDetectionHelper for ${currentModel.name}")
-                    if (fireSmokeHelper != null) {
+                    if (faceHelper != null) {
                         val bitmap = image.bitmap
-                        val detections = fireSmokeHelper!!.runInference(bitmap).map { det ->
+                        val detections = faceHelper!!.runInference(bitmap).map { det ->
                             Detection(det.x1, det.y1, det.x2, det.y2, det.confidence, det.classId, det.label)
                         }
                         InferenceResult(detections)
@@ -862,11 +866,11 @@ class MainActivity : AppCompatActivity() {
                         InferenceResult(runYoloxInference(interpreter, image))
                     }
                 }
-                "helmet", "helmet_detection", "safety" -> {
+                "helmet", "helmet_detection", "safety"-> {
                     Log.d("Inference", "Using HelmetDetectionHelper for ${currentModel.name}")
-                    if (helmetHelper != null) {
+                    if (faceHelper != null) {
                         val bitmap = image.bitmap
-                        val detections = helmetHelper!!.runInference(bitmap).map { det ->
+                        val detections = faceHelper!!.runInference(bitmap).map { det ->
                             Detection(det.x1, det.y1, det.x2, det.y2, det.confidence, det.classId, det.label)
                         }
                         InferenceResult(detections)
@@ -875,10 +879,7 @@ class MainActivity : AppCompatActivity() {
                         InferenceResult(runYoloxInference(interpreter, image))
                     }
                 }
-                "ssd", "ssd_mobilenet" -> {
-                    Log.d("Inference", "Using SSD inference for ${currentModel.name}")
-                    InferenceResult(runSsdInference(interpreter, image))
-                }
+                
                 else -> {
                     Log.w("Inference", "Unknown model type '${currentModel.type}', trying YOLO format")
                     InferenceResult(runYoloxInference(interpreter, image))
@@ -1170,8 +1171,12 @@ private fun parseSsdOutput(
                     paint.color = color
                     paint.style = Paint.Style.STROKE
                     
-                    val scaleX = w / INPUT_WIDTH
-                    val scaleY = h / INPUT_HEIGHT
+                    // Prefer scaling based on the actual last frame dimensions
+                    // to match helpers that return coordinates in original frame space.
+                    val baseWidth = if (lastFrameWidth > 0) lastFrameWidth.toFloat() else INPUT_WIDTH.toFloat()
+                    val baseHeight = if (lastFrameHeight > 0) lastFrameHeight.toFloat() else INPUT_HEIGHT.toFloat()
+                    val scaleX = w / baseWidth
+                    val scaleY = h / baseHeight
                     
                     val left = detection.x1 * scaleX
                     val top = detection.y1 * scaleY
