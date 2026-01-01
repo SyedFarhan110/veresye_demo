@@ -249,6 +249,12 @@ class _WebViewScreenState extends State<WebViewScreen>
     final platformController = controller.platform;
     if (platformController is AndroidWebViewController) {
       platformController.setOnShowFileSelector(_androidFilePicker);
+      // Enable gesture navigation to allow scrolling
+      platformController.setGeolocationPermissionsPromptCallbacks(
+        onShowPrompt: (request) async {
+          return GeolocationPermissionsResponse(allow: true, retain: true);
+        },
+      );
     }
   }
 
@@ -368,78 +374,79 @@ class _WebViewScreenState extends State<WebViewScreen>
       //     ),
       //   ],
       // ),
-      body: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onHorizontalDragStart: (details) {
-          _dragStartX = details.globalPosition.dx;
-          // Only trigger when gesture starts near the left edge to avoid
-          // interfering with WebView horizontal gestures.
-          _isSwipingBack = (_dragStartX ?? 0) < 32;
-          if (_isSwipingBack) {
-            setState(() {
-              _swipeProgress = 0.0;
-            });
-          }
-        },
-        onHorizontalDragUpdate: (details) {
-          if (!_isSwipingBack || _dragStartX == null) return;
-          final dx = details.globalPosition.dx - _dragStartX!;
-          // Only consider rightward drags
-          final progress = (dx / 140).clamp(0.0, 1.0);
-          setState(() {
-            _swipeProgress = progress;
-          });
-        },
-        onHorizontalDragEnd: (details) {
-          if (_isSwipingBack) {
-            final shouldPop =
-                _swipeProgress > 0.5 ||
-                (details.primaryVelocity != null &&
-                    details.primaryVelocity! > 300);
-            if (shouldPop && Navigator.of(context).canPop()) {
-              Navigator.of(context).pop();
-            }
-          }
-          setState(() {
-            _isSwipingBack = false;
-            _swipeProgress = 0.0;
-            _dragStartX = null;
-          });
-        },
-        child: Stack(
-          children: [
-            RefreshIndicator(
-              onRefresh: _onRefresh,
-              color: const Color(0xFF027E70),
-              backgroundColor: Colors.white,
-              child: WebViewWidget(controller: controller),
+      body: Stack(
+        children: [
+          // WebView layer - receives all gestures by default
+          WebViewWidget(controller: controller),
+          // Swipe-back gesture layer - only intercepts gestures from left edge
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: 32, // Only capture gestures from the left 32px edge
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onHorizontalDragStart: (details) {
+                _dragStartX = details.globalPosition.dx;
+                _isSwipingBack = true;
+                setState(() {
+                  _swipeProgress = 0.0;
+                });
+              },
+              onHorizontalDragUpdate: (details) {
+                if (!_isSwipingBack || _dragStartX == null) return;
+                final dx = details.globalPosition.dx - _dragStartX!;
+                // Only consider rightward drags
+                final progress = (dx / 140).clamp(0.0, 1.0);
+                setState(() {
+                  _swipeProgress = progress;
+                });
+              },
+              onHorizontalDragEnd: (details) {
+                if (_isSwipingBack) {
+                  final shouldPop =
+                      _swipeProgress > 0.5 ||
+                      (details.primaryVelocity != null &&
+                          details.primaryVelocity! > 300);
+                  if (shouldPop && Navigator.of(context).canPop()) {
+                    Navigator.of(context).pop();
+                  }
+                }
+                setState(() {
+                  _isSwipingBack = false;
+                  _swipeProgress = 0.0;
+                  _dragStartX = null;
+                });
+              },
             ),
-            if (_isSwipingBack)
-              Positioned(
-                left: 16 + (_swipeProgress * 56),
-                top: MediaQuery.of(context).size.height / 2 - 28,
-                child: AnimatedOpacity(
-                  opacity: _swipeProgress,
-                  duration: const Duration(milliseconds: 80),
-                  child: Container(
-                    width: 56,
-                    height: 56,
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.5),
-                      shape: BoxShape.circle,
-                    ),
-                    alignment: Alignment.center,
-                    child: Icon(
-                      Icons.chevron_left,
-                      color: Colors.white.withOpacity(_swipeProgress),
-                      size: 32,
-                    ),
+          ),
+          // Visual feedback for swipe-back
+          if (_isSwipingBack)
+            Positioned(
+              left: 16 + (_swipeProgress * 56),
+              top: MediaQuery.of(context).size.height / 2 - 28,
+              child: AnimatedOpacity(
+                opacity: _swipeProgress,
+                duration: const Duration(milliseconds: 80),
+                child: Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.5),
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(
+                    Icons.chevron_left,
+                    color: Colors.white.withOpacity(_swipeProgress),
+                    size: 32,
                   ),
                 ),
               ),
-            if (showSplash) _buildSplashScreen(),
-          ],
-        ),
+            ),
+          // Splash screen overlay
+          if (showSplash) _buildSplashScreen(),
+        ],
       ),
     );
   }
