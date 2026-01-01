@@ -92,7 +92,20 @@ class MainActivity : AppCompatActivity() {
     // ModelInfo is now in models package
     private val availableModels = mutableListOf<ModelInfo>()
     private var currentModelIndex: Int? = null
-    private val API_URL = "https://raw.githubusercontent.com/SyedFarhan110/Object_detection-/main/transformed_models.json"
+    private val API_URL = "https://ai-public-videos.s3.us-east-2.amazonaws.com/Inferenced+Videos/_weights/tflite_models"
+    
+    // Predefined list of available models
+    private val AVAILABLE_MODEL_NAMES = listOf(
+        "fire-smoke",
+        "dent",
+        "blink_drowse_update_1",
+        "face11n",
+        "helmet",
+        "lpd",
+        "yolo11n-pose",
+        "yolox_nano",
+        "yolo11n-seg"
+    )
     
     lateinit var bottomDashboard: LinearLayout
     lateinit var dashboardEmoji1: TextView
@@ -150,13 +163,13 @@ class MainActivity : AppCompatActivity() {
     // Detection helpers for specialized models
     private var poseHelper: PoseEstimationHelper? = null
     private var segmentationHelper: SegmentationHelper? = null
-    private var licensePlateHelper: LicensePlateDetectionHelper? = null
-    private var blinkDrowseHelper: BlinkDrowseDetectionHelper? = null
-    private var dentHelper: DentDetectionHelper? = null
     private var faceHelper: FaceDetectionHelper? = null
-    private var fireSmokeHelper: FireSmokeDetectionHelper? = null
-    private var groceryHelper: GroceryDetectionHelper? = null
-    private var helmetHelper: HelmetDetectionHelper? = null
+    private var licensePlateHelper: FaceDetectionHelper? = null
+    private var blinkDrowseHelper: FaceDetectionHelper? = null
+    private var dentHelper: FaceDetectionHelper? = null
+    private var fireSmokeHelper: FaceDetectionHelper? = null
+    private var groceryHelper: FaceDetectionHelper? = null
+    private var helmetHelper: FaceDetectionHelper? = null
     
     // Store annotated bitmap from pose/segmentation helpers
     private var annotatedBitmap: Bitmap? = null
@@ -362,36 +375,68 @@ class MainActivity : AppCompatActivity() {
     }
 
     private suspend fun fetchModelList() {
-        val jsonString = withContext(Dispatchers.IO) {
-            URL(API_URL).readText()
-        }
-        
-        val jsonArray = JSONArray(jsonString)
-        availableModels.clear()
-        
-        for (i in 0 until jsonArray.length()) {
-            val modelObj = jsonArray.getJSONObject(i)
-            val fileName = modelObj.getString("model_url").substringAfterLast("/")
-            val labelsFileName = modelObj.getString("labels_url").substringAfterLast("/")
+        withContext(Dispatchers.IO) {
+            availableModels.clear()
             
-            // Check if model is already downloaded
-            val modelFile = File(filesDir, fileName)
-            val labelsFile = File(filesDir, labelsFileName)
-            val isDownloaded = modelFile.exists() && labelsFile.exists()
+            AVAILABLE_MODEL_NAMES.forEach { modelName ->
+                // Construct file names
+                val modelFileName = "${modelName}_float32.tflite"
+                
+                // Special label file names for specific models
+                val labelsFileName = when (modelName) {
+                    "yolo11n-pose" -> "yoloPoseLabels.txt"
+                    "yolox_nano" -> "yoloLabels.txt"
+                    "yolo11n-seg" -> "yoloLabels.txt"
+                    else -> "${modelName}.txt"
+                }
+                
+                // Construct URLs
+                val modelUrl = "$API_URL/$modelFileName"
+                val labelsUrl = "$API_URL/tflite_classes/$labelsFileName"
+                
+                // Check if model is already downloaded
+                val modelFile = File(filesDir, modelFileName)
+                val labelsFile = File(filesDir, labelsFileName)
+                val isDownloaded = modelFile.exists() && labelsFile.exists()
+                
+                // Determine model type from model name
+                val modelType = when {
+                    modelName.contains("pose", ignoreCase = true) -> "yolo 11 pose"
+                    modelName.contains("seg", ignoreCase = true) -> "yolo 11 segmentation"
+                    modelName.contains("face", ignoreCase = true) -> "face_detection"
+                    modelName.contains("lpd", ignoreCase = true) -> "license_plate"
+                    modelName.contains("blink", ignoreCase = true) || modelName.contains("drowse", ignoreCase = true) -> "blink_drowse"
+                    modelName.contains("dent", ignoreCase = true) -> "dent"
+                    modelName.contains("fire", ignoreCase = true) || modelName.contains("smoke", ignoreCase = true) -> "fire_smoke"
+                    modelName.contains("helmet", ignoreCase = true) -> "helmet"
+                    modelName.contains("yolox", ignoreCase = true) -> "yolox"
+                    else -> "yolo"
+                }
+                
+                // Create display name (capitalize and format)
+                val displayName = modelName.split("_", "-")
+                    .joinToString(" ") { it.capitalize() }
+                
+                val modelInfo = ModelInfo(
+                    name = displayName,
+                    modelUrl = modelUrl,
+                    labelsUrl = labelsUrl,
+                    type = modelType,
+                    fileName = modelFileName,
+                    labelsFileName = labelsFileName,
+                    isDownloaded = isDownloaded
+                )
+                availableModels.add(modelInfo)
+                
+                Log.d("ModelAPI", "Added model: $displayName")
+                Log.d("ModelAPI", "  Model URL: $modelUrl")
+                Log.d("ModelAPI", "  Labels URL: $labelsUrl")
+                Log.d("ModelAPI", "  Type: $modelType")
+                Log.d("ModelAPI", "  Downloaded: $isDownloaded")
+            }
             
-            val modelInfo = ModelInfo(
-                name = modelObj.getString("name"),
-                modelUrl = modelObj.getString("model_url"),
-                labelsUrl = modelObj.getString("labels_url"),
-                type = modelObj.getString("type"),
-                fileName = fileName,
-                labelsFileName = labelsFileName,
-                isDownloaded = isDownloaded
-            )
-            availableModels.add(modelInfo)
+            Log.d("ModelAPI", "Prepared ${availableModels.size} models from predefined list")
         }
-        
-        Log.d("ModelAPI", "Found ${availableModels.size} models from API")
     }
 
     private suspend fun downloadModelIfNeeded(modelInfo: ModelInfo): Boolean {
@@ -524,13 +569,26 @@ class MainActivity : AppCompatActivity() {
     
     private fun initializeHelperForModel(modelInfo: ModelInfo) {
         try {
-            // Clean up existing helpers
+            // Clean up ALL existing helpers
             poseHelper?.close()
             segmentationHelper?.close()
+            faceHelper?.close()
             licensePlateHelper?.close()
+            blinkDrowseHelper?.close()
+            dentHelper?.close()
+            fireSmokeHelper?.close()
+            groceryHelper?.close()
+            helmetHelper?.close()
+
             poseHelper = null
             segmentationHelper = null
+            faceHelper = null
             licensePlateHelper = null
+            blinkDrowseHelper = null
+            dentHelper = null
+            fireSmokeHelper = null
+            groceryHelper = null
+            helmetHelper = null
             
             val modelFile = File(filesDir, modelInfo.fileName)
             val labelsFile = File(filesDir, modelInfo.labelsFileName)
@@ -546,43 +604,17 @@ class MainActivity : AppCompatActivity() {
                     segmentationHelper = SegmentationHelper(this)
                     segmentationHelper?.initialize(modelFile, labelsFile)
                 }
-                "license_plate", "license plate", "lpd" -> {
-                    Log.d("ModelDebug", "Initializing LicensePlateDetectionHelper")
-                    licensePlateHelper = LicensePlateDetectionHelper(this)
-                    licensePlateHelper?.initialize(modelFile, labelsFile)
-                }
-                "blink_drowse", "drowsiness", "blink" -> {
-                    Log.d("ModelDebug", "Initializing BlinkDrowseDetectionHelper")
-                    blinkDrowseHelper = BlinkDrowseDetectionHelper(this)
-                    blinkDrowseHelper?.initialize(modelFile, labelsFile)
-                }
-                "dent", "vehicle_damage" -> {
-                    Log.d("ModelDebug", "Initializing DentDetectionHelper")
-                    dentHelper = DentDetectionHelper(this)
-                    dentHelper?.initialize(modelFile, labelsFile)
-                }
-                "face", "face_detection" -> {
-                    Log.d("ModelDebug", "Initializing FaceDetectionHelper")
+                
+                else -> {
+                    Log.d("ModelDebug", "Initializing FaceDetectionHelper for all other models")
                     faceHelper = FaceDetectionHelper(this)
                     faceHelper?.initialize(modelFile, labelsFile)
-                }
-                "fire_smoke", "fire", "smoke" -> {
-                    Log.d("ModelDebug", "Initializing FireSmokeDetectionHelper")
-                    fireSmokeHelper = FireSmokeDetectionHelper(this)
-                    fireSmokeHelper?.initialize(modelFile, labelsFile)
-                }
-                "grocery", "grocery_detection" -> {
-                    Log.d("ModelDebug", "Initializing GroceryDetectionHelper")
-                    groceryHelper = GroceryDetectionHelper(this)
-                    groceryHelper?.initialize(modelFile, labelsFile)
-                }
-                "helmet", "helmet_detection", "safety" -> {
-                    Log.d("ModelDebug", "Initializing HelmetDetectionHelper")
-                    helmetHelper = HelmetDetectionHelper(this)
-                    helmetHelper?.initialize(modelFile, labelsFile)
-                }
-                else -> {
-                    Log.d("ModelDebug", "Using standard YOLO detection for ${modelInfo.type}")
+                    licensePlateHelper = faceHelper
+                    blinkDrowseHelper = faceHelper
+                    dentHelper = faceHelper
+                    fireSmokeHelper = faceHelper
+                    groceryHelper = faceHelper
+                    helmetHelper = faceHelper
                 }
             }
         } catch (e: Exception) {
@@ -714,7 +746,7 @@ class MainActivity : AppCompatActivity() {
 }
 
 
-     private fun runInference(image: TensorImage): InferenceResult {
+    private fun runInference(image: TensorImage): InferenceResult {
         val modelIndex = currentModelIndex ?: return InferenceResult(emptyList())
         val currentModel = availableModels[modelIndex]
         val interpreter = currentInterpreter ?: return InferenceResult(emptyList())
@@ -722,7 +754,12 @@ class MainActivity : AppCompatActivity() {
         return try {
             when (currentModel.type.lowercase()) {
                 "yolox", "yolo", "yolov5", "yolov8" -> {
+                    Log.d("Inference", "Using runYoloxInference for ${currentModel.name}")
+                    InferenceResult(runYoloxInference(interpreter, image))
+                }
+                "yolo", "yolov5", "yolov8" -> {
                     Log.d("Inference", "Using YOLO inference for ${currentModel.name}")
+                    // If you have a different YOLO inference function, call it here. Otherwise, fallback to runYoloxInference.
                     InferenceResult(runYoloxInference(interpreter, image))
                 }
                 "yolo 11 segmentation" -> {
