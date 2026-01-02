@@ -79,6 +79,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cameraButton: Button
     private lateinit var uploadButton: Button
     private lateinit var staticImageView: ImageView
+    
+    // Download progress UI
+    private var downloadProgressBar: android.widget.ProgressBar? = null
+    private var downloadProgressText: TextView? = null
     private var isInCameraMode = true
     private var uploadedImageUri: Uri? = null
     
@@ -461,6 +465,7 @@ class MainActivity : AppCompatActivity() {
                 Log.d("ModelDownload", "Downloading ${modelInfo.name}")
                 val connection = URL(modelInfo.modelUrl).openConnection()
                 connection.connect()
+                val fileLength = connection.contentLength
                 
                 val input = BufferedInputStream(connection.getInputStream())
                 val output = FileOutputStream(modelFile)
@@ -472,10 +477,21 @@ class MainActivity : AppCompatActivity() {
                     output.write(buffer, 0, bytesRead)
                     totalBytes += bytesRead
                     
-                    // Update progress every 100KB
-                    if (totalBytes % (100 * 1024) == 0L) {
+                    if (fileLength > 0) {
+                        val progress = (totalBytes * 100 / fileLength).toInt()
                         val mb = totalBytes / (1024.0 * 1024.0)
-                        updateLoadingDialog("Downloading ${modelInfo.name}... ${String.format("%.1f", mb)} MB")
+                        val totalMb = fileLength / (1024.0 * 1024.0)
+                        
+                        // Update UI every 1% or 100KB to avoid UI thread congestion
+                        if (totalBytes % (50 * 1024) == 0L || progress % 1 == 0) {
+                            updateDownloadProgress(progress, "Downloading ${String.format("%.1f", mb)}/${String.format("%.1f", totalMb)} MB")
+                        }
+                    } else {
+                        // Unknown size
+                        val mb = totalBytes / (1024.0 * 1024.0)
+                        if (totalBytes % (100 * 1024) == 0L) {
+                             updateDownloadProgress(0, "Downloading ${String.format("%.1f", mb)} MB...")
+                        }
                     }
                 }
                 
@@ -603,6 +619,9 @@ class MainActivity : AppCompatActivity() {
                     Log.d("ModelDebug", "Initializing SegmentationHelper")
                     segmentationHelper = SegmentationHelper(this)
                     segmentationHelper?.initialize(modelFile, labelsFile)
+                }
+                "yolox" -> {
+                    Log.d("ModelDebug", "Skipping helper initialization for YOLOX (handled natively)")
                 }
                 
                 else -> {
@@ -753,13 +772,12 @@ class MainActivity : AppCompatActivity() {
         
         return try {
             when (currentModel.type.lowercase()) {
-                "yolox", "yolo", "yolov5", "yolov8" -> {
-                    Log.d("Inference", "Using runYoloxInference for ${currentModel.name}")
+                "yolox" -> {
+                    Log.d("Inference", "Using runYoloxInference for YOLOX model: ${currentModel.name}")
                     InferenceResult(runYoloxInference(interpreter, image))
                 }
                 "yolo", "yolov5", "yolov8" -> {
-                    Log.d("Inference", "Using YOLO inference for ${currentModel.name}")
-                    // If you have a different YOLO inference function, call it here. Otherwise, fallback to runYoloxInference.
+                    Log.d("Inference", "Using runYoloxInference for ${currentModel.name}")
                     InferenceResult(runYoloxInference(interpreter, image))
                 }
                 "yolo 11 segmentation" -> {
@@ -1085,32 +1103,32 @@ private fun parseSsdOutput(
             val yCenter = output[offset + 1]
             val width = output[offset + 2]
             val height = output[offset + 3]
-            val objectness = output[offset + 4]
-            
-            if (objectness < CONFIDENCE_THRESHOLD) continue
-            
-            val numClasses = numValues - 5
-            var maxClassScore = 0f
-            var maxClassId = 0
-            for (c in 0 until numClasses) {
-                val classScore = output[offset + 5 + c]
-                if (classScore > maxClassScore) {
-                    maxClassScore = classScore
-                    maxClassId = c
+                val objectness = output[offset + 4]
+                
+                if (objectness < CONFIDENCE_THRESHOLD) continue
+                
+                val numClasses = numValues - 5
+                var maxClassScore = 0f
+                var maxClassId = 0
+                for (c in 0 until numClasses) {
+                    val classScore = output[offset + 5 + c]
+                    if (classScore > maxClassScore) {
+                        maxClassScore = classScore
+                        maxClassId = c
+                    }
                 }
-            }
-            
-            val confidence = objectness * maxClassScore
-            if (confidence < CONFIDENCE_THRESHOLD) continue
-            
-            val x1 = xCenter - width / 2f
-            val y1 = yCenter - height / 2f
-            val x2 = xCenter + width / 2f
-            val y2 = yCenter + height / 2f
-            
-            val label = if (maxClassId < labels.size) labels[maxClassId] else "Unknown"
-            
-            allDetections.add(Detection(x1, y1, x2, y2, confidence, maxClassId, label))
+                
+                val confidence = objectness * maxClassScore
+                if (confidence < CONFIDENCE_THRESHOLD) continue
+                
+                val x1 = xCenter - width / 2f
+                val y1 = yCenter - height / 2f
+                val x2 = xCenter + width / 2f
+                val y2 = yCenter + height / 2f
+                
+                val label = if (maxClassId < labels.size) labels[maxClassId] else "Unknown"
+                
+                allDetections.add(Detection(x1, y1, x2, y2, confidence, maxClassId, label))
         }
         
         return applyNMS(allDetections, NMS_THRESHOLD)
@@ -1419,6 +1437,41 @@ private fun parseSsdOutput(
             }, 800)
         }
     }
+
+    private fun showDownloadProgressDialog(title: String) {
+        runOnUiThread {
+            val builder = AlertDialog.Builder(this)
+            builder.setTitle(title)
+            builder.setCancelable(false)
+            
+            // Create layout programmatically
+            val layout = LinearLayout(this)
+            layout.orientation = LinearLayout.VERTICAL
+            layout.setPadding(50, 40, 50, 10)
+            
+            downloadProgressBar = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
+            downloadProgressBar?.isIndeterminate = false
+            downloadProgressBar?.max = 100
+            layout.addView(downloadProgressBar)
+            
+            downloadProgressText = TextView(this)
+            downloadProgressText?.text = "Starting download..."
+            downloadProgressText?.setPadding(0, 20, 0, 0)
+            downloadProgressText?.gravity = Gravity.CENTER
+            layout.addView(downloadProgressText)
+            
+            builder.setView(layout)
+            loadingDialog = builder.create()
+            loadingDialog?.show()
+        }
+    }
+    
+    private fun updateDownloadProgress(progress: Int, message: String) {
+        runOnUiThread {
+            downloadProgressBar?.progress = progress
+            downloadProgressText?.text = message
+        }
+    }
     
     private fun showErrorDialog(message: String) {
         runOnUiThread {
@@ -1667,7 +1720,7 @@ private fun parseSsdOutput(
     private fun downloadAndLoadModel(modelIndex: Int) {
         val modelInfo = availableModels[modelIndex]
         
-        showLoadingDialog("Downloading ${modelInfo.name}...")
+        showDownloadProgressDialog("Downloading ${modelInfo.name}")
         
         GlobalScope.launch(Dispatchers.Main) {
             val downloadSuccess = withContext(Dispatchers.IO) {
@@ -1675,7 +1728,7 @@ private fun parseSsdOutput(
             }
             
             if (downloadSuccess) {
-                updateLoadingDialog("Loading ${modelInfo.name}...")
+                updateDownloadProgress(100, "Loading model options...")
                 
                 val loadSuccess = withContext(Dispatchers.IO) {
                     loadAndInitializeModel(modelInfo)
