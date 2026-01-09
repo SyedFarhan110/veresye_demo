@@ -47,16 +47,17 @@ import org.json.JSONArray
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import com.example.verseye_demo.models.ModelInfo
-import com.example.verseye_demo.helpers.LicensePlateDetectionHelper
+//import com.example.verseye_demo.helpers.LicensePlateDetectionHelper
 import com.example.verseye_demo.helpers.PoseEstimationHelper
 import com.example.verseye_demo.helpers.SegmentationHelper
-import com.example.verseye_demo.helpers.BlinkDrowseDetectionHelper
-import com.example.verseye_demo.helpers.DentDetectionHelper
+//import com.example.verseye_demo.helpers.BlinkDrowseDetectionHelper
+//import com.example.verseye_demo.helpers.DentDetectionHelper
 import com.example.verseye_demo.helpers.FaceDetectionHelper
-import com.example.verseye_demo.helpers.FireSmokeDetectionHelper
-import com.example.verseye_demo.helpers.GroceryDetectionHelper
-import com.example.verseye_demo.helpers.HelmetDetectionHelper
+//import com.example.verseye_demo.helpers.FireSmokeDetectionHelper
+//import com.example.verseye_demo.helpers.GroceryDetectionHelper
+//import com.example.verseye_demo.helpers.HelmetDetectionHelper
 import com.example.verseye_demo.R
+import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
 
@@ -96,20 +97,10 @@ class MainActivity : AppCompatActivity() {
     // ModelInfo is now in models package
     private val availableModels = mutableListOf<ModelInfo>()
     private var currentModelIndex: Int? = null
-    private val API_URL = "https://ai-public-videos.s3.us-east-2.amazonaws.com/Inferenced+Videos/_weights/tflite_models"
+    private val API_URL = "http://ai-srv.qbscocloud.net:8006/models"
     
     // Predefined list of available models
-    private val AVAILABLE_MODEL_NAMES = listOf(
-        "fire-smoke",
-        "dent",
-        "blink_drowse_update_1",
-        "face11n",
-        "helmet",
-        "lpd",
-        "yolo11n-pose",
-        "yolox_nano",
-        "yolo11n-seg"
-    )
+    
     
     lateinit var bottomDashboard: LinearLayout
     lateinit var dashboardEmoji1: TextView
@@ -168,12 +159,6 @@ class MainActivity : AppCompatActivity() {
     private var poseHelper: PoseEstimationHelper? = null
     private var segmentationHelper: SegmentationHelper? = null
     private var faceHelper: FaceDetectionHelper? = null
-    private var licensePlateHelper: FaceDetectionHelper? = null
-    private var blinkDrowseHelper: FaceDetectionHelper? = null
-    private var dentHelper: FaceDetectionHelper? = null
-    private var fireSmokeHelper: FaceDetectionHelper? = null
-    private var groceryHelper: FaceDetectionHelper? = null
-    private var helmetHelper: FaceDetectionHelper? = null
     
     // Store annotated bitmap from pose/segmentation helpers
     private var annotatedBitmap: Bitmap? = null
@@ -379,24 +364,33 @@ class MainActivity : AppCompatActivity() {
     }
 
     private suspend fun fetchModelList() {
-        withContext(Dispatchers.IO) {
-            availableModels.clear()
+    withContext(Dispatchers.IO) {
+        availableModels.clear()
+        
+        try {
+            Log.d("ModelAPI", "Fetching models from: $API_URL")
             
-            AVAILABLE_MODEL_NAMES.forEach { modelName ->
-                // Construct file names
-                val modelFileName = "${modelName}_float32.tflite"
+            // Fetch JSON response from API
+            val jsonResponse = URL(API_URL).readText()
+            Log.d("ModelAPI", "API Response: $jsonResponse")
+            
+            // Parse JSON response
+            val jsonObject = JSONObject(jsonResponse)
+            val dataArray = jsonObject.getJSONArray("Data")
+            
+            Log.d("ModelAPI", "Found ${dataArray.length()} models in API response")
+            
+            // Process each model from the API
+            for (i in 0 until dataArray.length()) {
+                val modelObj = dataArray.getJSONObject(i)
                 
-                // Special label file names for specific models
-                val labelsFileName = when (modelName) {
-                    "yolo11n-pose" -> "yoloPoseLabels.txt"
-                    "yolox_nano" -> "yoloLabels.txt"
-                    "yolo11n-seg" -> "yoloLabels.txt"
-                    else -> "${modelName}.txt"
-                }
+                val modelName = modelObj.getString("model_name")
+                val modelUrl = modelObj.getString("model_url")
+                val labelsUrl = modelObj.getString("model_labels")
                 
-                // Construct URLs
-                val modelUrl = "$API_URL/$modelFileName"
-                val labelsUrl = "$API_URL/tflite_classes/$labelsFileName"
+                // Extract filename from URL
+                val modelFileName = modelUrl.substringAfterLast("/")
+                val labelsFileName = labelsUrl.substringAfterLast("/")
                 
                 // Check if model is already downloaded
                 val modelFile = File(filesDir, modelFileName)
@@ -404,22 +398,22 @@ class MainActivity : AppCompatActivity() {
                 val isDownloaded = modelFile.exists() && labelsFile.exists()
                 
                 // Determine model type from model name
+                // Only 3 special types need specific helpers, rest use faceHelper
                 val modelType = when {
                     modelName.contains("pose", ignoreCase = true) -> "yolo 11 pose"
                     modelName.contains("seg", ignoreCase = true) -> "yolo 11 segmentation"
-                    modelName.contains("face", ignoreCase = true) -> "face_detection"
-                    modelName.contains("lpd", ignoreCase = true) -> "license_plate"
-                    modelName.contains("blink", ignoreCase = true) || modelName.contains("drowse", ignoreCase = true) -> "blink_drowse"
-                    modelName.contains("dent", ignoreCase = true) -> "dent"
-                    modelName.contains("fire", ignoreCase = true) || modelName.contains("smoke", ignoreCase = true) -> "fire_smoke"
-                    modelName.contains("helmet", ignoreCase = true) -> "helmet"
                     modelName.contains("yolox", ignoreCase = true) -> "yolox"
-                    else -> "yolo"
+                    // ALL other models (including new ones added to API) will use faceHelper
+                    else -> "standard"
                 }
                 
                 // Create display name (capitalize and format)
                 val displayName = modelName.split("_", "-")
-                    .joinToString(" ") { it.capitalize() }
+                    .joinToString(" ") { word -> 
+                        word.replaceFirstChar { 
+                            if (it.isLowerCase()) it.titlecase() else it.toString() 
+                        }
+                    }
                 
                 val modelInfo = ModelInfo(
                     name = displayName,
@@ -432,16 +426,26 @@ class MainActivity : AppCompatActivity() {
                 )
                 availableModels.add(modelInfo)
                 
-                Log.d("ModelAPI", "Added model: $displayName")
-                Log.d("ModelAPI", "  Model URL: $modelUrl")
-                Log.d("ModelAPI", "  Labels URL: $labelsUrl")
-                Log.d("ModelAPI", "  Type: $modelType")
-                Log.d("ModelAPI", "  Downloaded: $isDownloaded")
+                Log.d("ModelAPI", "✅ Added model: $displayName")
+                Log.d("ModelAPI", "   Type: $modelType")
+                Log.d("ModelAPI", "   Model URL: $modelUrl")
+                Log.d("ModelAPI", "   Labels URL: $labelsUrl")
+                Log.d("ModelAPI", "   Downloaded: $isDownloaded")
             }
             
-            Log.d("ModelAPI", "Prepared ${availableModels.size} models from predefined list")
+            Log.d("ModelAPI", "Successfully loaded ${availableModels.size} models from API")
+            
+        } catch (e: Exception) {
+            Log.e("ModelAPI", "Error fetching model list: ${e.message}")
+            e.printStackTrace()
+            
+            // Fallback to empty list - user will see error dialog
+            availableModels.clear()
+            throw e
         }
     }
+}
+
 
     private suspend fun downloadModelIfNeeded(modelInfo: ModelInfo): Boolean {
         return try {
@@ -531,116 +535,144 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadAndInitializeModel(modelInfo: ModelInfo): Boolean {
-        try {
-            // Check if already loaded
-            if (modelInterpreters.containsKey(modelInfo.fileName)) {
-                currentInterpreter = modelInterpreters[modelInfo.fileName]
-                loadLabelsForModel(modelInfo)
-                // IMPORTANT: Always detect and set shapes when switching models
-                detectAndSetModelShapes(currentInterpreter!!, modelInfo.name)
-                return true
-            }
-            
-            val compatList = CompatibilityList()
-            val interpreterOptions = Interpreter.Options()
-            
-            if(compatList.isDelegateSupportedOnThisDevice) {
-                Log.d("ModelDebug", "✅ GPU acceleration enabled")
-                if (gpuDelegate == null) {
-                    try {
-                        gpuDelegate = GpuDelegate()
-                        interpreterOptions.addDelegate(gpuDelegate)
-                    } catch (e: Throwable) {
-                        Log.w("ModelDebug", "GPU delegate fallback to CPU: ${e.message}")
-                    }
-                } else {
-                    interpreterOptions.addDelegate(gpuDelegate)
-                }
-            } else {
-                Log.d("ModelDebug", "⚠️ Using CPU")
-            }
-            
-            val interpreter = Interpreter(loadModelFile(modelInfo.fileName), interpreterOptions)
-            modelInterpreters[modelInfo.fileName] = interpreter
-            currentInterpreter = interpreter
-            
-            Log.d("ModelDebug", "✅ Loaded ${modelInfo.name}")
-            
-            // Dynamically detect and set model shapes
-            detectAndSetModelShapes(interpreter, modelInfo.name)
-            
-            // Load labels
+    try {
+        // CRITICAL: Stop processing during model switch
+        val wasProcessing = isProcessing
+        isProcessing = true
+        
+        // Check if already loaded
+        if (modelInterpreters.containsKey(modelInfo.fileName)) {
+            currentInterpreter = modelInterpreters[modelInfo.fileName]
             loadLabelsForModel(modelInfo)
-            
-            // Initialize specialized helpers if needed
+            detectAndSetModelShapes(currentInterpreter!!, modelInfo.name)
             initializeHelperForModel(modelInfo)
-            
+            isProcessing = wasProcessing
             return true
-        } catch (e: Exception) {
-            Log.e("ModelDebug", "Error loading model: ${e.message}")
-            e.printStackTrace()
-            return false
         }
-    }
-    
-    private fun initializeHelperForModel(modelInfo: ModelInfo) {
-        try {
-            // Clean up ALL existing helpers
-            poseHelper?.close()
-            segmentationHelper?.close()
-            faceHelper?.close()
-            licensePlateHelper?.close()
-            blinkDrowseHelper?.close()
-            dentHelper?.close()
-            fireSmokeHelper?.close()
-            groceryHelper?.close()
-            helmetHelper?.close()
-
-            poseHelper = null
-            segmentationHelper = null
-            faceHelper = null
-            licensePlateHelper = null
-            blinkDrowseHelper = null
-            dentHelper = null
-            fireSmokeHelper = null
-            groceryHelper = null
-            helmetHelper = null
-            
-            val modelFile = File(filesDir, modelInfo.fileName)
-            val labelsFile = File(filesDir, modelInfo.labelsFileName)
-            
-            when (modelInfo.type.lowercase()) {
-                "yolo 11 pose" -> {
-                    Log.d("ModelDebug", "Initializing PoseEstimationHelper")
-                    poseHelper = PoseEstimationHelper(this)
-                    poseHelper?.initialize(modelFile, labelsFile)
-                }
-                "yolo 11 segmentation" -> {
-                    Log.d("ModelDebug", "Initializing SegmentationHelper")
-                    segmentationHelper = SegmentationHelper(this)
-                    segmentationHelper?.initialize(modelFile, labelsFile)
-                }
-                "yolox" -> {
-                    Log.d("ModelDebug", "Skipping helper initialization for YOLOX (handled natively)")
-                }
-                
-                else -> {
-                    Log.d("ModelDebug", "Initializing FaceDetectionHelper for all other models")
-                    faceHelper = FaceDetectionHelper(this)
-                    faceHelper?.initialize(modelFile, labelsFile)
-                    licensePlateHelper = faceHelper
-                    blinkDrowseHelper = faceHelper
-                    dentHelper = faceHelper
-                    fireSmokeHelper = faceHelper
-                    groceryHelper = faceHelper
-                    helmetHelper = faceHelper
-                }
+        
+        val compatList = CompatibilityList()
+        val interpreterOptions = Interpreter.Options()
+        
+        // IMPORTANT: Create a NEW GPU delegate for each model
+        // Don't reuse the old one as it causes memory corruption
+        var modelGpuDelegate: GpuDelegate? = null
+        
+        if(compatList.isDelegateSupportedOnThisDevice) {
+            Log.d("ModelDebug", "✅ GPU acceleration enabled")
+            try {
+                modelGpuDelegate = GpuDelegate()
+                interpreterOptions.addDelegate(modelGpuDelegate)
+            } catch (e: Throwable) {
+                Log.w("ModelDebug", "GPU delegate fallback to CPU: ${e.message}")
+                modelGpuDelegate?.close()
+                modelGpuDelegate = null
             }
-        } catch (e: Exception) {
-            Log.e("ModelDebug", "Error initializing helper: ${e.message}")
-            e.printStackTrace()
+        } else {
+            Log.d("ModelDebug", "⚠️ Using CPU")
         }
+        
+        val interpreter = Interpreter(loadModelFile(modelInfo.fileName), interpreterOptions)
+        
+        // Store both interpreter and its dedicated GPU delegate
+        modelInterpreters[modelInfo.fileName] = interpreter
+        
+        // Close old global GPU delegate if switching models
+        if (modelGpuDelegate != null) {
+            gpuDelegate?.close()
+            gpuDelegate = modelGpuDelegate
+        }
+        
+        currentInterpreter = interpreter
+        
+        Log.d("ModelDebug", "✅ Loaded ${modelInfo.name}")
+        
+        // Dynamically detect and set model shapes
+        detectAndSetModelShapes(interpreter, modelInfo.name)
+        
+        // Load labels
+        loadLabelsForModel(modelInfo)
+        
+        // Initialize specialized helpers if needed
+        initializeHelperForModel(modelInfo)
+        
+        // Resume processing
+        isProcessing = wasProcessing
+        
+        return true
+    } catch (e: Exception) {
+        Log.e("ModelDebug", "Error loading model: ${e.message}")
+        e.printStackTrace()
+        isProcessing = false
+        return false
     }
+}
+    
+private fun initializeHelperForModel(modelInfo: ModelInfo) {
+    try {
+        // CRITICAL: Clean up helpers in specific order to prevent crashes
+        Log.d("ModelDebug", "Cleaning up old helpers...")
+        
+        // Close pose helper
+        try {
+            poseHelper?.close()
+        } catch (e: Exception) {
+            Log.e("ModelDebug", "Error closing pose helper: ${e.message}")
+        }
+        poseHelper = null
+        
+        // Close segmentation helper
+        try {
+            segmentationHelper?.close()
+        } catch (e: Exception) {
+            Log.e("ModelDebug", "Error closing segmentation helper: ${e.message}")
+        }
+        segmentationHelper = null
+        
+        // Close face helper
+        try {
+            faceHelper?.close()
+        } catch (e: Exception) {
+            Log.e("ModelDebug", "Error closing face helper: ${e.message}")
+        }
+        faceHelper = null
+        
+        // Clear annotated bitmap
+        annotatedBitmap?.recycle()
+        annotatedBitmap = null
+        
+        // Small delay to ensure cleanup is complete
+        Thread.sleep(50)
+        
+        val modelFile = File(filesDir, modelInfo.fileName)
+        val labelsFile = File(filesDir, modelInfo.labelsFileName)
+        
+        when (modelInfo.type.lowercase()) {
+            "yolo 11 pose" -> {
+                Log.d("ModelDebug", "Initializing PoseEstimationHelper")
+                poseHelper = PoseEstimationHelper(this)
+                poseHelper?.initialize(modelFile, labelsFile)
+            }
+            "yolo 11 segmentation" -> {
+                Log.d("ModelDebug", "Initializing SegmentationHelper")
+                segmentationHelper = SegmentationHelper(this)
+                segmentationHelper?.initialize(modelFile, labelsFile)
+            }
+            "yolox", "yolo", "yolov5", "yolov8" -> {
+                Log.d("ModelDebug", "Skipping helper initialization for YOLO variants (handled natively)")
+            }
+            else -> {
+                Log.d("ModelDebug", "Initializing FaceDetectionHelper for model type: ${modelInfo.type}")
+                faceHelper = FaceDetectionHelper(this)
+                faceHelper?.initialize(modelFile, labelsFile)
+            }
+        }
+    } catch (e: Exception) {
+        Log.e("ModelDebug", "Error initializing helper: ${e.message}")
+        e.printStackTrace()
+    }
+}
+
+
 
     private fun detectAndSetModelShapes(interpreter: Interpreter, modelName: String) {
         try {
@@ -765,187 +797,85 @@ class MainActivity : AppCompatActivity() {
 }
 
 
-    private fun runInference(image: TensorImage): InferenceResult {
-        val modelIndex = currentModelIndex ?: return InferenceResult(emptyList())
-        val currentModel = availableModels[modelIndex]
-        val interpreter = currentInterpreter ?: return InferenceResult(emptyList())
-        
-        return try {
-            when (currentModel.type.lowercase()) {
-                "yolox" -> {
-                    Log.d("Inference", "Using runYoloxInference for YOLOX model: ${currentModel.name}")
-                    InferenceResult(runYoloxInference(interpreter, image))
-                }
-                "yolo", "yolov5", "yolov8" -> {
-                    Log.d("Inference", "Using runYoloxInference for ${currentModel.name}")
-                    InferenceResult(runYoloxInference(interpreter, image))
-                }
-                "yolo 11 segmentation" -> {
-                    Log.d("Inference", "Using SegmentationHelper for ${currentModel.name}")
-                    if (segmentationHelper != null) {
-                        val bitmap = image.bitmap
-                        val (segmentationResults, maskBitmap) = segmentationHelper!!.runInference(bitmap)
-                        // Store annotated bitmap for overlay display
-                        annotatedBitmap = maskBitmap
-                        // Convert segmentation results to standard Detection format
-                        val detections = segmentationResults.map { result ->
-                            Detection(
-                                x1 = result.x1,
-                                y1 = result.y1,
-                                x2 = result.x2,
-                                y2 = result.y2,
-                                confidence = result.confidence,
-                                classId = result.classId,
-                                label = result.label
-                            )
-                        }
-                        InferenceResult(detections, maskBitmap)
-                    } else {
-                        Log.e("Inference", "SegmentationHelper not initialized, falling back to YOLO")
-                        InferenceResult(runYoloxInference(interpreter, image))
+   private fun runInference(image: TensorImage): InferenceResult {
+    val modelIndex = currentModelIndex ?: return InferenceResult(emptyList())
+    val currentModel = availableModels[modelIndex]
+    val interpreter = currentInterpreter ?: return InferenceResult(emptyList())
+    
+    return try {
+        when (currentModel.type.lowercase()) {
+            "yolo 11 segmentation" -> {
+                Log.d("Inference", "Using SegmentationHelper for ${currentModel.name}")
+                if (segmentationHelper != null) {
+                    val bitmap = image.bitmap
+                    val (segmentationResults, maskBitmap) = segmentationHelper!!.runInference(bitmap)
+                    annotatedBitmap = maskBitmap
+                    val detections = segmentationResults.map { result ->
+                        Detection(
+                            x1 = result.x1,
+                            y1 = result.y1,
+                            x2 = result.x2,
+                            y2 = result.y2,
+                            confidence = result.confidence,
+                            classId = result.classId,
+                            label = result.label
+                        )
                     }
-                }
-                "yolo 11 pose" -> {
-                    Log.d("Inference", "Using PoseEstimationHelper for ${currentModel.name}")
-                    if (poseHelper != null) {
-                        val bitmap = image.bitmap
-                        val (poseResults, poseBitmap) = poseHelper!!.runInference(bitmap)
-                        // Store annotated bitmap for overlay display
-                        annotatedBitmap = poseBitmap
-                        // Convert pose results to standard Detection format for counting only
-                        // NOTE: When annotatedBitmap is present, these detections will NOT be drawn
-                        // to avoid duplicate bounding boxes. The bounding boxes in annotatedBitmap
-                        // are already properly positioned and styled (green color with skeleton).
-                        val detections = poseResults.map { result ->
-                            Detection(
-                                x1 = result.x1,
-                                y1 = result.y1,
-                                x2 = result.x2,
-                                y2 = result.y2,
-                                confidence = result.confidence,
-                                classId = 0,
-                                label = "person"
-                            )
-                        }
-                        InferenceResult(detections, poseBitmap)
-                    } else {
-                        Log.e("Inference", "PoseEstimationHelper not initialized, falling back to YOLO")
-                        InferenceResult(runYoloxInference(interpreter, image))
-                    }
-                }
-                "license_plate", "license plate", "lpd", "face", "face_detection"-> {
-                    Log.d("Inference", "Using LicensePlateDetectionHelper for ${currentModel.name}")
-                    if (faceHelper != null) {
-                        val bitmap = image.bitmap
-                        val lpDetections = faceHelper!!.runInference(bitmap)
-                        // Convert license plate detections to standard Detection format
-                        val detections = lpDetections.map { det ->
-                            Detection(
-                                x1 = det.x1,
-                                y1 = det.y1,
-                                x2 = det.x2,
-                                y2 = det.y2,
-                                confidence = det.confidence,
-                                classId = det.classId,
-                                label = det.label
-                            )
-                        }
-                        InferenceResult(detections)
-                    } else {
-                        Log.e("Inference", "LicensePlateDetectionHelper not initialized, falling back to YOLO")
-                        InferenceResult(runYoloxInference(interpreter, image))
-                    }
-                }
-                "blink_drowse", "drowsiness", "blink" -> {
-                    Log.d("Inference", "Using BlinkDrowseDetectionHelper for ${currentModel.name}")
-                    if (blinkDrowseHelper != null) {
-                        val bitmap = image.bitmap
-                        val detections = blinkDrowseHelper!!.runInference(bitmap).map { det ->
-                            Detection(det.x1, det.y1, det.x2, det.y2, det.confidence, det.classId, det.label)
-                        }
-                        InferenceResult(detections)
-                    } else {
-                        Log.e("Inference", "BlinkDrowseDetectionHelper not initialized, falling back to YOLO")
-                        InferenceResult(runYoloxInference(interpreter, image))
-                    }
-                }
-                "dent", "vehicle_damage" -> {
-                    Log.d("Inference", "Using DentDetectionHelper for ${currentModel.name}")
-                    if (dentHelper != null) {
-                        val bitmap = image.bitmap
-                        val detections = dentHelper!!.runInference(bitmap).map { det ->
-                            Detection(det.x1, det.y1, det.x2, det.y2, det.confidence, det.classId, det.label)
-                        }
-                        InferenceResult(detections)
-                    } else {
-                        Log.e("Inference", "DentDetectionHelper not initialized, falling back to YOLO")
-                        InferenceResult(runYoloxInference(interpreter, image))
-                    }
-                }
-                "face", "face_detection" -> {
-                    Log.d("Inference", "Using FaceDetectionHelper for ${currentModel.name}")
-                    if (faceHelper != null) {
-                        val bitmap = image.bitmap
-                        val detections = faceHelper!!.runInference(bitmap).map { det ->
-                            Detection(det.x1, det.y1, det.x2, det.y2, det.confidence, det.classId, det.label)
-                        }
-                        InferenceResult(detections)
-                    } else {
-                        Log.e("Inference", "FaceDetectionHelper not initialized, falling back to YOLO")
-                        InferenceResult(runYoloxInference(interpreter, image))
-                    }
-                }
-                "fire_smoke", "fire", "smoke" , "face", "face_detection"-> {
-                    Log.d("Inference", "Using FireSmokeDetectionHelper for ${currentModel.name}")
-                    if (faceHelper != null) {
-                        val bitmap = image.bitmap
-                        val detections = faceHelper!!.runInference(bitmap).map { det ->
-                            Detection(det.x1, det.y1, det.x2, det.y2, det.confidence, det.classId, det.label)
-                        }
-                        InferenceResult(detections)
-                    } else {
-                        Log.e("Inference", "FireSmokeDetectionHelper not initialized, falling back to YOLO")
-                        InferenceResult(runYoloxInference(interpreter, image))
-                    }
-                }
-                "grocery", "grocery_detection" -> {
-                    Log.d("Inference", "Using GroceryDetectionHelper for ${currentModel.name}")
-                    if (groceryHelper != null) {
-                        val bitmap = image.bitmap
-                        val detections = groceryHelper!!.runInference(bitmap).map { det ->
-                            Detection(det.x1, det.y1, det.x2, det.y2, det.confidence, det.classId, det.label)
-                        }
-                        InferenceResult(detections)
-                    } else {
-                        Log.e("Inference", "GroceryDetectionHelper not initialized, falling back to YOLO")
-                        InferenceResult(runYoloxInference(interpreter, image))
-                    }
-                }
-                "helmet", "helmet_detection", "safety"-> {
-                    Log.d("Inference", "Using HelmetDetectionHelper for ${currentModel.name}")
-                    if (faceHelper != null) {
-                        val bitmap = image.bitmap
-                        val detections = faceHelper!!.runInference(bitmap).map { det ->
-                            Detection(det.x1, det.y1, det.x2, det.y2, det.confidence, det.classId, det.label)
-                        }
-                        InferenceResult(detections)
-                    } else {
-                        Log.e("Inference", "HelmetDetectionHelper not initialized, falling back to YOLO")
-                        InferenceResult(runYoloxInference(interpreter, image))
-                    }
-                }
-                
-                else -> {
-                    Log.w("Inference", "Unknown model type '${currentModel.type}', trying YOLO format")
-                    InferenceResult(runYoloxInference(interpreter, image))
+                    InferenceResult(detections, maskBitmap)
+                } else {
+                    Log.e("Inference", "SegmentationHelper not initialized")
+                    InferenceResult(emptyList())
                 }
             }
-        } catch (e: Exception) {
-            Log.e("Inference", "Inference failed for ${currentModel.name}: ${e.message}")
-            e.printStackTrace()
-            InferenceResult(emptyList())
+            "yolo 11 pose" -> {
+                Log.d("Inference", "Using PoseEstimationHelper for ${currentModel.name}")
+                if (poseHelper != null) {
+                    val bitmap = image.bitmap
+                    val (poseResults, poseBitmap) = poseHelper!!.runInference(bitmap)
+                    annotatedBitmap = poseBitmap
+                    val detections = poseResults.map { result ->
+                        Detection(
+                            x1 = result.x1,
+                            y1 = result.y1,
+                            x2 = result.x2,
+                            y2 = result.y2,
+                            confidence = result.confidence,
+                            classId = 0,
+                            label = "person"
+                        )
+                    }
+                    InferenceResult(detections, poseBitmap)
+                } else {
+                    Log.e("Inference", "PoseEstimationHelper not initialized")
+                    InferenceResult(emptyList())
+                }
+            }
+            "yolox", "yolo", "yolov5", "yolov8" -> {
+                Log.d("Inference", "Using native YOLO inference for ${currentModel.name}")
+                InferenceResult(runYoloxInference(interpreter, image))
+            }
+            else -> {
+                // ALL other models use FaceDetectionHelper
+                // This includes: fire_smoke, dent, blink_drowse, helmet, license_plate, face_detection, etc.
+                Log.d("Inference", "Using FaceDetectionHelper for ${currentModel.name} (type: ${currentModel.type})")
+                if (faceHelper != null) {
+                    val bitmap = image.bitmap
+                    val detections = faceHelper!!.runInference(bitmap).map { det ->
+                        Detection(det.x1, det.y1, det.x2, det.y2, det.confidence, det.classId, det.label)
+                    }
+                    InferenceResult(detections)
+                } else {
+                    Log.e("Inference", "FaceDetectionHelper not initialized for ${currentModel.name}")
+                    InferenceResult(emptyList())
+                }
+            }
         }
+    } catch (e: Exception) {
+        Log.e("Inference", "Inference failed for ${currentModel.name}: ${e.message}")
+        e.printStackTrace()
+        InferenceResult(emptyList())
     }
+}
 
     private fun runYoloxInference(interpreter: Interpreter, image: TensorImage): List<Detection> {
         val inputBuffer = image.tensorBuffer.buffer
@@ -1272,12 +1202,44 @@ private fun parseSsdOutput(
     }
 
     override fun onDestroy() {
-        super.onDestroy()
-        close_camera()
-        modelInterpreters.values.forEach { it.close() }
-        modelInterpreters.clear()
-        gpuDelegate?.close()
+    super.onDestroy()
+    
+    // Stop processing first
+    isProcessing = true
+    
+    // Close camera
+    close_camera()
+    
+    // Close all helpers
+    try {
+        poseHelper?.close()
+        segmentationHelper?.close()
+        faceHelper?.close()
+    } catch (e: Exception) {
+        Log.e("Cleanup", "Error closing helpers: ${e.message}")
     }
+    
+    // Close all interpreters
+    modelInterpreters.values.forEach { 
+        try {
+            it.close()
+        } catch (e: Exception) {
+            Log.e("Cleanup", "Error closing interpreter: ${e.message}")
+        }
+    }
+    modelInterpreters.clear()
+    
+    // Close GPU delegate
+    try {
+        gpuDelegate?.close()
+    } catch (e: Exception) {
+        Log.e("Cleanup", "Error closing GPU delegate: ${e.message}")
+    }
+    
+    // Clean up bitmaps
+    annotatedBitmap?.recycle()
+    annotatedBitmap = null
+}
     
     override fun onPause() {
         super.onPause()
@@ -1506,7 +1468,7 @@ private fun parseSsdOutput(
         runOnUiThread {
             if (top2.isNotEmpty()) {
                 val (label1, cnt1) = top2[0]
-                val emoji1 = labelToEmoji[label1] ?: "❓"
+                val emoji1 = labelToEmoji[label1] ?: label1
                 dashboardEmoji1.text = emoji1
                 dashboardCount1.text = cnt1.toString()
             } else {
@@ -1516,7 +1478,7 @@ private fun parseSsdOutput(
             
             if (top2.size >= 2) {
                 val (label2, cnt2) = top2[1]
-                val emoji2 = labelToEmoji[label2] ?: "❓"
+                val emoji2 = labelToEmoji[label2] ?: label2
                 dashboardEmoji2.text = emoji2
                 dashboardCount2.text = cnt2.toString()
             } else {
@@ -1579,11 +1541,12 @@ private fun parseSsdOutput(
                         setPadding(8, 12, 8, 12)
                     }
 
-                    val emoji = labelToEmoji[label] ?: "❓"
+                    val isEmoji = labelToEmoji.containsKey(label)
+                    val emoji = if (isEmoji) labelToEmoji[label] else label
                     
                     val emojiView = TextView(this@MainActivity).apply {
                         text = emoji
-                        textSize = 32f
+                        textSize = if (isEmoji) 32f else 18f
                         setPadding(0, 0, 16, 0)
                     }
                     
@@ -1689,73 +1652,98 @@ private fun parseSsdOutput(
     }
     
     private fun loadAndSwitchToModel(modelIndex: Int) {
-        val modelInfo = availableModels[modelIndex]
+    val modelInfo = availableModels[modelIndex]
+    
+    // CRITICAL: Stop all frame processing before switching
+    isProcessing = true
+    
+    showLoadingDialog("Loading ${modelInfo.name}...")
+    
+    GlobalScope.launch(Dispatchers.Main) {
+        // Add a small delay to let any in-flight processing complete
+        delay(100)
         
-        showLoadingDialog("Loading ${modelInfo.name}...")
+        val success = withContext(Dispatchers.IO) {
+            loadAndInitializeModel(modelInfo)
+        }
         
-        GlobalScope.launch(Dispatchers.Main) {
-            val success = withContext(Dispatchers.IO) {
+        if (success) {
+            currentModelIndex = modelIndex
+            dismissLoadingDialog("${modelInfo.name} loaded!")
+            
+            // Open camera if not already open
+            if (textureView.isAvailable && !this@MainActivity::cameraDevice.isInitialized) {
+                open_camera()
+            }
+            
+            Log.d("ModelDebug", "✅ Switched to: ${modelInfo.name}")
+            Log.d("ModelDebug", "✅ Input size: ${INPUT_WIDTH}x${INPUT_HEIGHT}")
+            Log.d("ModelDebug", "✅ Output shape: ${OUTPUT_SHAPE?.contentToString()}")
+            
+            // Resume frame processing after a small delay
+            delay(100)
+            isProcessing = false
+        } else {
+            dismissLoadingDialog("Failed to load ${modelInfo.name}")
+            showErrorDialog("Failed to load ${modelInfo.name}. Please try again.")
+            isProcessing = false
+        }
+    }
+}
+
+    
+    private fun downloadAndLoadModel(modelIndex: Int) {
+    val modelInfo = availableModels[modelIndex]
+    
+    // CRITICAL: Stop all frame processing before downloading/switching
+    isProcessing = true
+    
+    showDownloadProgressDialog("Downloading ${modelInfo.name}")
+    
+    GlobalScope.launch(Dispatchers.Main) {
+        val downloadSuccess = withContext(Dispatchers.IO) {
+            downloadModelIfNeeded(modelInfo)
+        }
+        
+        if (downloadSuccess) {
+            updateDownloadProgress(100, "Loading model options...")
+            
+            // Add delay before loading
+            delay(100)
+            
+            val loadSuccess = withContext(Dispatchers.IO) {
                 loadAndInitializeModel(modelInfo)
             }
             
-            if (success) {
+            if (loadSuccess) {
                 currentModelIndex = modelIndex
-                dismissLoadingDialog("${modelInfo.name} loaded!")
+                dismissLoadingDialog("${modelInfo.name} ready!")
                 
                 // Open camera if not already open
                 if (textureView.isAvailable && !this@MainActivity::cameraDevice.isInitialized) {
                     open_camera()
                 }
                 
-                Log.d("ModelDebug", "✅ Switched to: ${modelInfo.name}")
+                Log.d("ModelDebug", "✅ Downloaded and loaded: ${modelInfo.name}")
                 Log.d("ModelDebug", "✅ Input size: ${INPUT_WIDTH}x${INPUT_HEIGHT}")
                 Log.d("ModelDebug", "✅ Output shape: ${OUTPUT_SHAPE?.contentToString()}")
+                
+                // Resume processing after delay
+                delay(100)
+                isProcessing = false
             } else {
                 dismissLoadingDialog("Failed to load ${modelInfo.name}")
-                showErrorDialog("Failed to load ${modelInfo.name}. Please try again.")
+                showErrorDialog("Downloaded but failed to load ${modelInfo.name}. Please try again.")
+                isProcessing = false
             }
+        } else {
+            dismissLoadingDialog("Download failed")
+            showErrorDialog("Failed to download ${modelInfo.name}. Please check your internet connection.")
+            isProcessing = false
         }
     }
-    
-    private fun downloadAndLoadModel(modelIndex: Int) {
-        val modelInfo = availableModels[modelIndex]
-        
-        showDownloadProgressDialog("Downloading ${modelInfo.name}")
-        
-        GlobalScope.launch(Dispatchers.Main) {
-            val downloadSuccess = withContext(Dispatchers.IO) {
-                downloadModelIfNeeded(modelInfo)
-            }
-            
-            if (downloadSuccess) {
-                updateDownloadProgress(100, "Loading model options...")
-                
-                val loadSuccess = withContext(Dispatchers.IO) {
-                    loadAndInitializeModel(modelInfo)
-                }
-                
-                if (loadSuccess) {
-                    currentModelIndex = modelIndex
-                    dismissLoadingDialog("${modelInfo.name} ready!")
-                    
-                    // Open camera if not already open
-                    if (textureView.isAvailable && !this@MainActivity::cameraDevice.isInitialized) {
-                        open_camera()
-                    }
-                    
-                    Log.d("ModelDebug", "✅ Downloaded and loaded: ${modelInfo.name}")
-                    Log.d("ModelDebug", "✅ Input size: ${INPUT_WIDTH}x${INPUT_HEIGHT}")
-                    Log.d("ModelDebug", "✅ Output shape: ${OUTPUT_SHAPE?.contentToString()}")
-                } else {
-                    dismissLoadingDialog("Failed to load ${modelInfo.name}")
-                    showErrorDialog("Downloaded but failed to load ${modelInfo.name}. Please try again.")
-                }
-            } else {
-                dismissLoadingDialog("Download failed")
-                showErrorDialog("Failed to download ${modelInfo.name}. Please check your internet connection.")
-            }
-        }
-    }
+}
+
     
     private fun showUploadOptions() {
         val options = arrayOf("Image", "Video")
