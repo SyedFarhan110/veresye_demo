@@ -66,6 +66,29 @@ class HomeScreen extends StatelessWidget {
     }
   }
 
+  Future<void> _startOCRDetection(BuildContext context) async {
+    if (Platform.isAndroid) {
+      try {
+        await platform.invokeMethod('startOCRDetection');
+      } on PlatformException catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to start OCR Detection: ${e.message}'),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      }
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This feature is only available on Android'),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -88,6 +111,17 @@ class HomeScreen extends StatelessWidget {
                   textStyle: const TextStyle(fontSize: 18),
                 ),
                 child: const Text('CV using Custom Models on Device'),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: () {
+                  _startOCRDetection(context);
+                },
+                style: ElevatedButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 60),
+                  textStyle: const TextStyle(fontSize: 18),
+                ),
+                child: const Text('OCR using Custom Model on Device'),
               ),
               const SizedBox(height: 20),
               ElevatedButton(

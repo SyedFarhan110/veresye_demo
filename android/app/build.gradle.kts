@@ -54,7 +54,11 @@ android {
                 "lib/arm64-v8a/libtensorflowlite_jni.so",
                 "lib/armeabi-v7a/libtensorflowlite_jni.so",
                 "lib/x86/libtensorflowlite_jni.so",
-                "lib/x86_64/libtensorflowlite_jni.so"
+                "lib/x86_64/libtensorflowlite_jni.so",
+                "lib/arm64-v8a/libc++_shared.so",
+                "lib/armeabi-v7a/libc++_shared.so",
+                "lib/x86/libc++_shared.so",
+                "lib/x86_64/libc++_shared.so"
             )
         }
     }
@@ -82,4 +86,14 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    
+    // PaddleOCR4Android modules
+    implementation(project(":PaddleOCR4Android"))
+    
+    // CameraX for OCR
+    val cameraxVersion = "1.2.3"
+    implementation("androidx.camera:camera-core:$cameraxVersion")
+    implementation("androidx.camera:camera-camera2:$cameraxVersion")
+    implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
+    implementation("androidx.camera:camera-view:$cameraxVersion")
 }

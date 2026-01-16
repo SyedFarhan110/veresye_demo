@@ -22,6 +22,15 @@ class MainActivity : FlutterActivity() {
 							result.error("ACTIVITY_ERROR", e.message, null)
 						}
 					}
+					"startOCRDetection" -> {
+						try {
+							val intent = Intent(this, com.example.verseye_demo.ocr.CameraActivity::class.java)
+							startActivity(intent)
+							result.success(null)
+						} catch (e: Exception) {
+							result.error("ACTIVITY_ERROR", e.message, null)
+						}
+					}
 					else -> result.notImplemented()
 				}
 			}
